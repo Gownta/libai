@@ -1,0 +1,141 @@
+#!/usr/bin/python3
+
+
+"""
+qq: ChatGPT in the terminal
+
+Chat completion API:
+https://platform.openai.com/docs/api-reference/chat/create
+
+See billing usage at https://platform.openai.com/usage
+"""
+
+
+import argparse
+import logging
+import os
+import time
+import sys
+from logging.handlers import TimedRotatingFileHandler
+
+from openai import OpenAI
+
+
+def get_parser():
+    parser = argparse.ArgumentParser(
+        prog="qq",
+        description="CLI for chat-gpt",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+
+    parser.add_argument(
+        "content",
+        nargs="*",
+        help="The chat message",
+    )
+
+    parser.add_argument(
+        "-l",
+        "--long",
+        action="store_true",
+        help="Allow long responses",
+    )
+    parser.add_argument(
+        "--model",
+        choices=["gpt-4o", "gpt-4o-mini"],
+        default="gpt-4o",
+        help="Model to use",
+    )
+    parser.add_argument(
+        "-m",
+        action="store_const",
+        const="gpt-4o-mini",
+        dest="model",
+        help="Use -mini model",
+    )
+    parser.add_argument(
+        "--logdir",
+        default=os.path.expanduser("~/.logs/qq/"),
+        help="Where to log",
+    )
+    parser.add_argument(
+        "--speed",
+        type=float,
+        default=0.001,
+        help="How long to wait between keystrokes",
+    )
+
+    return parser
+
+
+def get_args(argv):
+    return get_parser().parse_args(argv)
+
+
+def configure_logger(logdir):
+    os.makedirs(logdir, exist_ok=True)
+    path = os.path.join(logdir, "log")
+
+    global logger
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    handler = TimedRotatingFileHandler(path, when="d")
+    formatter = logging.Formatter(
+        fmt="{levelname:.1}{asctime} {filename}:{lineno}: {message}",
+        style="{",
+    )
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+
+def mk_params(args):
+    ret = {
+        "model": args.model,
+        "messages": [{"role": "user", "content": " ".join(args.content)}],
+    }
+    if not args.long:
+        ret["max_tokens"] = 1000 # ~1.5 cents, if we get the full 1000
+
+    return ret
+
+
+def reply(params, speed):
+    client = OpenAI()
+    responses = client.chat.completions.create(
+        stream=True,
+        stream_options={"include_usage": True},
+        **params,
+    )
+
+    done = False
+    msg_parts = []
+    for r in responses:
+        assert not done
+        if r.choices:
+            d = r.choices[0].delta.content
+            if not d:
+                continue
+            msg_parts.append(d)
+            for c in d:
+                print(c, end="", flush=True)
+                time.sleep(speed)
+        else:
+            done = True
+            print("")
+            indented_whole = "".join(msg_parts).replace("\n", "\n  ")
+            logger.info(f"Reply:\n  {indented_whole}")
+            usage = r.usage
+            logger.info(f"Usage: {usage.prompt_tokens=}, {usage.completion_tokens=}")
+
+
+def main(argv):
+    args = get_args(argv)
+    configure_logger(args.logdir)
+    logger.info("qq " + " ".join(argv))
+    params = mk_params(args)
+    logger.info(params)
+    reply(params, args.speed)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])
