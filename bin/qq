@@ -10,6 +10,12 @@ https://platform.openai.com/docs/api-reference/chat/create
 See billing usage at https://platform.openai.com/usage
 """
 
+system_prompt = """
+You are a programmer's assistant, called from the command line.
+Jump straight to the answer, using 30 words or fewer.
+If possible, your output should be strictly code or a copy-pasteable command-line, with no additional english text or explanation.
+Do not include formatting in your output - your output should be plain text, suitable to be written to the terminal.
+""".strip()
 
 import argparse
 import logging
@@ -91,7 +97,10 @@ def configure_logger(logdir):
 def mk_params(args):
     ret = {
         "model": args.model,
-        "messages": [{"role": "user", "content": " ".join(args.content)}],
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": " ".join(args.content)},
+        ],
     }
     if not args.long:
         ret["max_tokens"] = 1000 # ~1.5 cents, if we get the full 1000
